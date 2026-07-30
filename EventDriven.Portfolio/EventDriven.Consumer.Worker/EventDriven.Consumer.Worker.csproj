@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UserSecretsId>dotnet-EventDriven.Consumer.Worker-07524ab1-7f9d-4643-8fc8-e9268daedcf0</UserSecretsId>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MassTransit.RabbitMQ" Version="9.2.0" />
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />		
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\EventDriven.Contracts\EventDriven.Contracts.csproj" />
+	</ItemGroup>
+</Project>

@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-local
+    ports:
+      - "5672:5672"    # Protocolo AMQP (Conexión desde .NET) 🔌
+      - "15672:15672"  # Panel de administración Web 📊
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq # Persistencia local 💾
+
+  sqlserver:
+      image: mcr.microsoft.com/mssql/server:2022-latest
+      container_name: sqlserver-local
+      user: root
+      ports:
+        - "1433:1433"    # Puerto estándar de SQL Server 🔌
+      environment:
+        - ACCEPT_EULA=Y
+        - MSSQL_SA_PASSWORD=TuPassword123! # ⚠️ Contraseña fuerte para el usuario 'sa'
+      volumes:
+        - sqlserver_data:/var/opt/mssql/data # Persistencia de SQL Server 💾
+
+volumes:
+  rabbitmq_data:
+  sqlserver_data:
