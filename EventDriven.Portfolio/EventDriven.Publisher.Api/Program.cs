@@ -3,8 +3,34 @@ using EventDriven.Publisher.Api.Data;
 using EventDriven.Publisher.Api.Entities;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(options =>
+{
+    options.IncludeScopes = true;
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+    options.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    {
+        Indented = true // Formato legible en la terminal
+    };
+});
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService(serviceName: "api-service"))
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddSource(TelemetryDiagnostics.Source.Name) // 👈 Escucha nuestra fuente "EventDriven.Telemetry"
+            .AddAspNetCoreInstrumentation()              // Captura automáticamente las peticiones HTTP de la API
+            .AddSource("MassTransit")                    // Escucha nativamente a MassTransit
+            .AddConsoleExporter();                       // Imprime la traza estructurada en la terminal
+    });
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -55,9 +81,17 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapPost("/orders", async (AppDbContext dbContext, IPublishEndpoint publishEndpoint) =>
+app.MapPost("/orders", async (ILogger<Program> _logger, AppDbContext dbContext, IPublishEndpoint publishEndpoint) =>
 {
+    // 🔍 1. Iniciamos el Span raíz de la operación en la API
+    using var activity = TelemetryDiagnostics.Source.StartActivity("CreateOrderEndpoint");
+
     var order = new Order { Id = Guid.NewGuid(), CustomerId = "CUST-1", TotalAmount = 100.00m, CreatedAtUtc = DateTime.UtcNow };
+
+    // 🏷️ 2. Añadimos etiquetas informativas a la traza
+    activity?.SetTag("order.id", order.Id);
+    activity?.SetTag("order.customer_id", order.CustomerId);
+
     dbContext.Orders.Add(order);
 
     var @event = new OrderCreatedEvent(order.Id, order.CustomerId, order.TotalAmount, order.CreatedAtUtc);
@@ -68,6 +102,11 @@ app.MapPost("/orders", async (AppDbContext dbContext, IPublishEndpoint publishEn
 
     // 🔒 AQUÍ SE GUARDA TODO O NADA EN UNA SOLA TRANSACCIÓN
     await dbContext.SaveChangesAsync();
+
+    _logger.LogInformation("Mensaje procesado correctamente. Orden ID: {OrderId}, Estado: {Status}", order.Id, "Completado");
+
+    // 🟢 3. Marcamos el estado del Span como exitoso
+    activity?.SetStatus(ActivityStatusCode.Ok);
 
     return Results.Ok();
 });
