@@ -1,0 +1,20 @@
+﻿<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>1b77b669-2dde-4510-b682-5032a4a086e3</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.4.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EventDriven.Consumer.Worker\EventDriven.Consumer.Worker.csproj" />
+    <ProjectReference Include="..\EventDriven.Publisher.Api\EventDriven.Publisher.Api.csproj" />
+  </ItemGroup>
+
+</Project>

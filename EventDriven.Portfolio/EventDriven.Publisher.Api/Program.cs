@@ -3,11 +3,17 @@ using EventDriven.Publisher.Api.Data;
 using EventDriven.Publisher.Api.Entities;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Identity.Client;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var apiMeter = new Meter("EventDriven.Publisher.Api", "1.0.0");
+builder.Services.AddSingleton(apiMeter);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options =>
@@ -29,7 +35,23 @@ builder.Services.AddOpenTelemetry()
             .AddSource(TelemetryDiagnostics.Source.Name) // 👈 Escucha nuestra fuente "EventDriven.Telemetry"
             .AddAspNetCoreInstrumentation()              // Captura automáticamente las peticiones HTTP de la API
             .AddSource("MassTransit")                    // Escucha nativamente a MassTransit
-            .AddConsoleExporter();                       // Imprime la traza estructurada en la terminal
+            .AddConsoleExporter()                       // Imprime la traza estructurada en la terminal
+            .AddOtlpExporter(options =>
+                {
+                    // Puerto gRPC OTLP por defecto del Aspire Dashboard
+                    options.Endpoint = new Uri("http://localhost:4317");
+                });
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics
+        .AddMeter("EventDriven.Publisher.Api") // 🏷️ Pasa el nombre exacto de tu Meter aquí
+        .AddAspNetCoreInstrumentation() // Opcional: captura métricas nativas de peticiones HTTP en la API
+        .AddOtlpExporter(options =>
+        {
+            // Puerto gRPC OTLP por defecto del Aspire Dashboard
+            options.Endpoint = new Uri("http://localhost:4317");
+        });
     });
 
 // Add services to the container.
@@ -37,7 +59,13 @@ builder.Services.AddOpenTelemetry()
 builder.Services.AddOpenApi();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        sqlOptions => sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,                   // 🔄 Intentar hasta 5 veces
+            maxRetryDelay: TimeSpan.FromSeconds(20), // ⏱️ Tiempo máximo de espera entre reintentos
+            errorNumbersToAdd: null)
+    ));
 
 builder.Services.AddOpenApi(options =>
 {
@@ -62,12 +90,21 @@ builder.Services.AddMassTransit(x =>
     // Indicar que usaremos RabbitMQ como nuestro transporte de mensajes
     x.UsingRabbitMq((context, cfg) =>
     {
-        // Configurar la conexión al servidor de RabbitMQ
-        cfg.Host("localhost", "/", h =>
+        var connectionString = builder.Configuration.GetConnectionString("messaging");
+
+        if (!string.IsNullOrEmpty(connectionString))
         {
-            h.Username("guest");
-            h.Password("guest");
-        });
+            // Aspire pasa el URI completo (amqp://guest:guest@localhost:puerto_dinamico)
+            cfg.Host(new Uri(connectionString));
+        }
+        else
+        {
+            cfg.Host("localhost", "/", h =>
+            {
+                h.Username("guest");
+                h.Password("guest");
+            });
+        }
     });
 });
 
@@ -148,5 +185,11 @@ app.MapPost("/orders", async (ILogger<Program> _logger, AppDbContext dbContext, 
 
 //    return Results.Ok(new { Message = "Evento publicado exitosamente", Event = @event });
 //});
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 await app.RunAsync();

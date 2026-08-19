@@ -1,6 +1,7 @@
 using EventDriven.Consumer.Worker;
 using EventDriven.Contracts;
 using MassTransit;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using System.Diagnostics.Metrics;
@@ -28,7 +29,21 @@ builder.Services.AddOpenTelemetry()
         tracing
             .AddSource(TelemetryDiagnostics.Source.Name) // Tu propia fuente
             .AddSource("MassTransit")                    // Escucha nativamente a MassTransit
-            .AddConsoleExporter();                       // Muestra en consola
+            .AddConsoleExporter()                       // Muestra en consola
+            .AddOtlpExporter(options =>
+                {
+                    // Puerto gRPC OTLP por defecto del Aspire Dashboard
+                    options.Endpoint = new Uri("http://localhost:4317");
+                });
+    }).WithMetrics(metrics =>
+    {
+        metrics
+        .AddMeter("EventDriven.Worker") // 🏷️ Pasa el nombre exacto de tu Meter aquí
+        .AddOtlpExporter(options =>
+        {
+            // Puerto gRPC OTLP por defecto del Aspire Dashboard
+            options.Endpoint = new Uri("http://localhost:4317");
+        });
     });
 
 //builder.Services.AddHostedService<Worker_WithOut_MassTransit>();
@@ -42,11 +57,21 @@ builder.Services.AddMassTransit(x =>
     // 2. Configurar el transporte con RabbitMQ
     x.UsingRabbitMq((context, cfg) =>
     {
-        cfg.Host("localhost", "/", h =>
+        var connectionString = builder.Configuration.GetConnectionString("messaging");
+
+        if (!string.IsNullOrEmpty(connectionString))
         {
-            h.Username("guest");
-            h.Password("guest");
-        });
+            // Aspire pasa el URI completo (amqp://guest:guest@localhost:puerto_dinamico)
+            cfg.Host(new Uri(connectionString));
+        }
+        else
+        {
+            cfg.Host("localhost", "/", h =>
+            {
+                h.Username("guest");
+                h.Password("guest");
+            });
+        }
 
         // Configura automáticamente las colas (endpoints) según los consumidores registrados
         cfg.ConfigureEndpoints(context);

@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "EventDriven.AppHost.csproj"
+  }
+}
