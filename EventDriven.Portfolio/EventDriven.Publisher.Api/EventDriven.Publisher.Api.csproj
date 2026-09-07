@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EventDriven.Contracts\EventDriven.Contracts.csproj" />
+    <ProjectReference Include="..\EventDriven.ServiceDefaults\EventDriven.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

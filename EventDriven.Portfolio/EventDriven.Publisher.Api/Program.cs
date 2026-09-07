@@ -1,6 +1,7 @@
 using EventDriven.Contracts;
 using EventDriven.Publisher.Api.Data;
 using EventDriven.Publisher.Api.Entities;
+using EventDriven.ServiceDefaults;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Client;
@@ -11,6 +12,8 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddServiceDefaults(); // 👈 Activa OpenTelemetry, Health Checks y métricas automáticamente
 
 var apiMeter = new Meter("EventDriven.Publisher.Api", "1.0.0");
 builder.Services.AddSingleton(apiMeter);
@@ -35,23 +38,23 @@ builder.Services.AddOpenTelemetry()
             .AddSource(TelemetryDiagnostics.Source.Name) // 👈 Escucha nuestra fuente "EventDriven.Telemetry"
             .AddAspNetCoreInstrumentation()              // Captura automáticamente las peticiones HTTP de la API
             .AddSource("MassTransit")                    // Escucha nativamente a MassTransit
-            .AddConsoleExporter()                       // Imprime la traza estructurada en la terminal
-            .AddOtlpExporter(options =>
-                {
-                    // Puerto gRPC OTLP por defecto del Aspire Dashboard
-                    options.Endpoint = new Uri("http://localhost:4317");
-                });
+            .AddConsoleExporter();                       // Imprime la traza estructurada en la terminal
+            //.AddOtlpExporter(options =>
+            //    {
+            //        // Puerto gRPC OTLP por defecto del Aspire Dashboard
+            //        options.Endpoint = new Uri("http://localhost:4317");
+            //    });
     })
     .WithMetrics(metrics =>
     {
         metrics
         .AddMeter("EventDriven.Publisher.Api") // 🏷️ Pasa el nombre exacto de tu Meter aquí
-        .AddAspNetCoreInstrumentation() // Opcional: captura métricas nativas de peticiones HTTP en la API
-        .AddOtlpExporter(options =>
-        {
-            // Puerto gRPC OTLP por defecto del Aspire Dashboard
-            options.Endpoint = new Uri("http://localhost:4317");
-        });
+        .AddAspNetCoreInstrumentation(); // Opcional: captura métricas nativas de peticiones HTTP en la API
+        //.AddOtlpExporter(options =>
+        //{
+        //    // Puerto gRPC OTLP por defecto del Aspire Dashboard
+        //    options.Endpoint = new Uri("http://localhost:4317");
+        //});
     });
 
 // Add services to the container.
@@ -85,6 +88,12 @@ builder.Services.AddMassTransit(x =>
     {
         o.UseSqlServer();
         o.UseBusOutbox(); // Redirige el IPublishEndpoint al Outbox
+    });
+
+    // 2. Habilitar la deduplicación en los consumidores
+    x.AddConfigureEndpointsCallback((context, name, cfg) =>
+    {
+        cfg.UseEntityFrameworkOutbox<AppDbContext>(context);
     });
 
     // Indicar que usaremos RabbitMQ como nuestro transporte de mensajes
@@ -133,9 +142,11 @@ app.MapPost("/orders", async (ILogger<Program> _logger, AppDbContext dbContext, 
 
     var @event = new OrderCreatedEvent(order.Id, order.CustomerId, order.TotalAmount, order.CreatedAtUtc);
 
-    // ⚠️ Importante: Esto YA NO envía el mensaje a RabbitMQ inmediatamente.
-    // Lo escribe temporalmente en la tabla de Outbox del DbContext.
-    await publishEndpoint.Publish(@event);
+    // Enviar el evento original
+    await publishEndpoint.Publish(@event, context => context.MessageId = order.Id);
+
+    // 🧪 SIMULACIÓN DE DUPLICADO: Publicar inmediatamente el mismo evento con el mismo MessageId
+    await publishEndpoint.Publish(@event, context => context.MessageId = order.Id);
 
     // 🔒 AQUÍ SE GUARDA TODO O NADA EN UNA SOLA TRANSACCIÓN
     await dbContext.SaveChangesAsync();

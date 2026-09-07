@@ -9,6 +9,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="MassTransit.RabbitMQ" Version="9.2.0" />
+		<PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
 		<PackageReference Include="OpenTelemetry" Version="1.17.0" />
 		<PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.17.0" />
@@ -18,5 +19,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\EventDriven.Contracts\EventDriven.Contracts.csproj" />
+		<ProjectReference Include="..\EventDriven.Publisher.Api\EventDriven.Publisher.Api.csproj" />
+		<ProjectReference Include="..\EventDriven.ServiceDefaults\EventDriven.ServiceDefaults.csproj" />
 	</ItemGroup>
 </Project>

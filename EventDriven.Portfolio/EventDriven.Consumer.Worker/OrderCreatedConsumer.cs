@@ -2,15 +2,19 @@
 using MassTransit;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using static MassTransit.Monitoring.Performance.BuiltInCounters;
 
 namespace EventDriven.Consumer.Worker
 {
-    public class OrderCreatedConsumer(ILogger<OrderCreatedConsumer> _logger, Counter<long> _messageCounter) : IConsumer<OrderCreatedEvent>
+    public class OrderCreatedConsumer(ILogger<OrderCreatedConsumer> _logger, WorkerMetrics metrics) : IConsumer<OrderCreatedEvent>
     {
         public Task Consume(ConsumeContext<OrderCreatedEvent> context)
         {
             // El objeto des-serializado ya viene listo dentro de context.Message 📦
             var @event = context.Message;
+
+            //Console.WriteLine($"[Worker] Recibido evento para la orden: {@event.OrderId}. Simulando error...");
+            //throw new TimeoutException("🔥 Error simulado en el procesamiento de la orden.");
 
             // 🔍 Iniciamos la traza (Span) para medir esta operación específica
             using var activity = TelemetryDiagnostics.Source.StartActivity("ProcessOrderCreatedEvent");
@@ -29,7 +33,7 @@ namespace EventDriven.Consumer.Worker
             // Retornamos una tarea completada.
             // Si no lanzamos ninguna excepción, MassTransit confirma automáticamente el mensaje (BasicAck) a RabbitMQ 👍
 
-            _messageCounter.Add(1, KeyValuePair.Create<string, object?>("tipo_evento", nameof(OrderCreatedEvent)), KeyValuePair.Create<string, object?>("estado", "exitoso"));
+            metrics.IncrementProcessedEvents(nameof(OrderCreatedEvent), "exitoso");
 
             // 🟢 Marcamos el estado de la traza como OK
             activity?.SetStatus(ActivityStatusCode.Ok);

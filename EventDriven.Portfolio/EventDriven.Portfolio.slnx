@@ -3,4 +3,5 @@
   <Project Path="EventDriven.Consumer.Worker/EventDriven.Consumer.Worker.csproj" />
   <Project Path="EventDriven.Contracts/EventDriven.Contracts.csproj" />
   <Project Path="EventDriven.Publisher.Api/EventDriven.Publisher.Api.csproj" />
+  <Project Path="EventDriven.ServiceDefaults/EventDriven.ServiceDefaults.csproj" Id="28dd944d-b9bc-445f-a2dd-09b2cf9b8a6f" />
 </Solution>
