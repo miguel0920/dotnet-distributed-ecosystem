@@ -1,9 +1,11 @@
 using EventDriven.Consumer.Worker;
 using EventDriven.Contracts;
 using EventDriven.Publisher.Api.Data;
+using EventDriven.Publisher.Api.Entities;
 using EventDriven.ServiceDefaults;
 using MassTransit;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -37,11 +39,11 @@ builder.Services.AddOpenTelemetry()
             .AddSource(TelemetryDiagnostics.Source.Name) // Tu propia fuente
             .AddSource("MassTransit")                    // Escucha nativamente a MassTransit
             .AddConsoleExporter();                       // Muestra en consola
-            //.AddOtlpExporter(options =>
-            //    {
-            //        // Puerto gRPC OTLP por defecto del Aspire Dashboard
-            //        options.Endpoint = new Uri("http://localhost:4317");
-            //    });
+                                                         //.AddOtlpExporter(options =>
+                                                         //    {
+                                                         //        // Puerto gRPC OTLP por defecto del Aspire Dashboard
+                                                         //        options.Endpoint = new Uri("http://localhost:4317");
+                                                         //    });
     }).WithMetrics(metrics =>
     {
         metrics
@@ -55,11 +57,37 @@ builder.Services.AddOpenTelemetry()
 
 //builder.Services.AddHostedService<Worker_WithOut_MassTransit>();
 
+builder.Services.AddDbContext<AppDbContext>(options =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? builder.Configuration.GetConnectionString("sqlserver");
+
+    options.UseSqlServer(connectionString);
+});
+
 // Configurar MassTransit 🚌
 builder.Services.AddMassTransit(x =>
 {
-    // 1. Registrar nuestro consumidor
-    x.AddConsumer<OrderCreatedConsumer>();
+    // 2. Configurar la integración con Entity Framework (Outbox & Saga Repository) 📝
+    x.AddEntityFrameworkOutbox<AppDbContext>(o =>
+    {
+        o.UseSqlServer();
+        o.UseBusOutbox();
+    });
+
+    // 3. Registrar la Máquina de Estados (Saga)
+    x.AddSagaStateMachine<OrderStateMachine, OrderState>()
+        .EntityFrameworkRepository(r =>
+        {
+            r.ExistingDbContext<AppDbContext>();
+            r.UseSqlServer();
+        });
+
+    // 4. Configurar Middleware global para consumidores/sagas
+    x.AddConfigureEndpointsCallback((context, name, cfg) =>
+    {
+        cfg.UseEntityFrameworkOutbox<AppDbContext>(context);
+    });
 
     // 2. Configurar el transporte con RabbitMQ
     x.UsingRabbitMq((context, cfg) =>
@@ -80,7 +108,7 @@ builder.Services.AddMassTransit(x =>
             });
         }
 
-        cfg.UseMessageRetry(r => 
+        cfg.UseMessageRetry(r =>
         {
             // Reintentar solo si es una excepción de base de datos o timeout
             r.Handle<SqlException>();

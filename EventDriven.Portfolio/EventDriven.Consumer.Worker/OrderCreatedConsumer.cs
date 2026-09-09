@@ -1,8 +1,6 @@
 ﻿using EventDriven.Contracts;
 using MassTransit;
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
-using static MassTransit.Monitoring.Performance.BuiltInCounters;
 
 namespace EventDriven.Consumer.Worker
 {

@@ -4,7 +4,6 @@ using EventDriven.Publisher.Api.Entities;
 using EventDriven.ServiceDefaults;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Identity.Client;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -29,6 +28,27 @@ builder.Logging.AddJsonConsole(options =>
     };
 });
 
+// 💳 Configuración de un HttpClient resiliente para servicios externos
+builder.Services.AddHttpClient("PaymentService", client =>
+{
+    client.BaseAddress = new Uri("https://api.pasareladepagos.com/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+})
+.AddStandardResilienceHandler(options =>
+{
+    // 1. Personalizar reintentos
+    options.Retry.MaxRetryAttempts = 3;
+    options.Retry.Delay = TimeSpan.FromSeconds(2);
+    options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
+
+    // 2. Personalizar Cortacircuitos (Circuit Breaker)
+    options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+    options.CircuitBreaker.FailureRatio = 0.5; // Abrir circuito si el 50% falla
+
+    // 3. Tiempo límite por intento individual
+    options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(3);
+});
+
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource
         .AddService(serviceName: "api-service"))
@@ -39,11 +59,11 @@ builder.Services.AddOpenTelemetry()
             .AddAspNetCoreInstrumentation()              // Captura automáticamente las peticiones HTTP de la API
             .AddSource("MassTransit")                    // Escucha nativamente a MassTransit
             .AddConsoleExporter();                       // Imprime la traza estructurada en la terminal
-            //.AddOtlpExporter(options =>
-            //    {
-            //        // Puerto gRPC OTLP por defecto del Aspire Dashboard
-            //        options.Endpoint = new Uri("http://localhost:4317");
-            //    });
+                                                         //.AddOtlpExporter(options =>
+                                                         //    {
+                                                         //        // Puerto gRPC OTLP por defecto del Aspire Dashboard
+                                                         //        options.Endpoint = new Uri("http://localhost:4317");
+                                                         //    });
     })
     .WithMetrics(metrics =>
     {
@@ -157,6 +177,59 @@ app.MapPost("/orders", async (ILogger<Program> _logger, AppDbContext dbContext, 
     activity?.SetStatus(ActivityStatusCode.Ok);
 
     return Results.Ok();
+});
+
+app.MapPost("/orders/checkout", async (IHttpClientFactory clientFactory, IPublishEndpoint publishEndpoint, AppDbContext dbContext) =>
+{
+    var client = clientFactory.CreateClient("PaymentService");
+
+    try
+    {
+        // 💳 Polly interceptará esta llamada aplicando Retry y Circuit Breaker si falla
+        var response = await client.GetAsync("/process-payment");
+        response.EnsureSuccessStatusCode();
+    }
+    catch (Polly.Timeout.TimeoutRejectedException)
+    {
+        // Captura específica cuando Polly cancela por exceder el tiempo de espera
+        return Results.Problem(
+            statusCode: StatusCodes.Status504GatewayTimeout,
+            detail: "El servicio de pagos tardó demasiado en responder.");
+    }
+    catch (Polly.CircuitBreaker.BrokenCircuitException)
+    {
+        // Captura específica si el circuito se abrió por demasiados fallos seguidos
+        return Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            detail: "El servicio de pagos está temporalmente fuera de servicio (Circuit Breaker Abierto).");
+    }
+
+    // Continuar con la lógica normal de tu orden...
+    return Results.Ok(new { Status = "Pago exitoso y orden en camino" });
+});
+
+app.MapPost("/saga/orders", async (IPublishEndpoint publishEndpoint) =>
+{
+    var orderId = Guid.NewGuid();
+    var @event = new OrderSubmittedEvent(orderId, "CUST-99", 250.50m, DateTime.UtcNow);
+
+    await publishEndpoint.Publish(@event);
+
+    return Results.Ok(new { OrderId = orderId, Status = "OrderSubmittedEvent publicado" });
+});
+
+app.MapPost("/saga/orders/{id:guid}/pay", async (Guid id, bool isSuccessful, IPublishEndpoint publishEndpoint) =>
+{
+    if (isSuccessful)
+    {
+        await publishEndpoint.Publish(new PaymentCompletedEvent(id, DateTime.UtcNow));
+        return Results.Ok(new { OrderId = id, Status = "PaymentCompletedEvent publicado" });
+    }
+    else
+    {
+        await publishEndpoint.Publish(new PaymentFailedEvent(id, "Fondos insuficientes"));
+        return Results.Ok(new { OrderId = id, Status = "PaymentFailedEvent publicado" });
+    }
 });
 
 // Without MassTransit
